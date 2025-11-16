@@ -1,39 +1,41 @@
-# from dotenv import load_dotenv, find_dotenv
-# load_dotenv(find_dotenv(usecwd=True))   # searches for .env upward from your current working dir
-
-# from mqth_q import config
-# print(config.explain())  # sanity: shows what was loaded
-
-# from mqth_q.db import init_db, get_user_id, list_unseen, fetch_question
-# init_db()
-# uid = get_user_id("student1")
-# print("User:", uid)
-# print("Unseen (first 3):", list_unseen(uid, 3))
-
-#from mqth_q.baseline import baseline_grade
-#print(baseline_grade("Show that the operator is a contraction", "Use Banach contraction to get unique fixed point"))
-#from mqth_q.grading import grade_best_with_feedback
-#print(grade_best_with_feedback("Q", "S", "A"))
-
-# app.py
 from __future__ import annotations
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException, Query
-
-# Load .env BEFORE imports that read env
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv(usecwd=True))
-
 from mqth_q import config
 from mqth_q.db import init_db
 from mqth_q.service import (
     next_questions_for, get_question_card, submit_answer,
     get_user_summary, get_recent_attempts, list_topics, pick_random_by_topic
-)
-
+    )
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="Math Trainer API", version="0.2.0")
+
+# ------------------------------------------ MONITOREO --------------------------------------------
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+from starlette.requests import Request
+from starlette.responses import Response
+REQS = Counter("http_requests_total", "HTTP requests", ["method","path","status"])
+LAT  = Histogram("http_request_latency_seconds", "Latency seconds", ["path"])
+
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    import time
+    start = time.perf_counter()
+    response = await call_next(request)
+    LAT.labels(path=request.url.path).observe(time.perf_counter() - start)
+    REQS.labels(method=request.method, path=request.url.path, status=response.status_code).inc()
+    return response
+
+@app.get("/metrics")
+def metrics():
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+#from metrics import instrument_app, record_attempt, track_llm_latency, track_baseline_latency
+#instrument_app(app)
+# --------------------------------------------------------------------------------------------------
 
 # ---- Schemas (I/O) ----
 class QuestionCard(BaseModel):
